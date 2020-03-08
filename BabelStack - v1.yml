@@ -1,0 +1,410 @@
+version: '3'
+
+services:
+  mongo:
+    image: mongo
+    # privileded: true
+    restart: always
+    ports:
+      - 27017:27017
+    working_dir: /babel/workspace/mongo
+     
+    volumes:
+      - mongoW:/babel/workspace/mongo
+      - mongo-data:/data/db 
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking
+  redis:
+    image: docker.babel.cc/babelredis
+    # constraints:
+    #   - node.hostname == babel-m
+    # privileged: true
+    depends_on:
+      - mongo
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-data:/babel/workspace/redis
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking
+  mysql:
+    image: docker.babel.cc/babelmysql
+    # privileded: true
+    restart: always
+    depends_on:
+      - redis
+    ports:
+      - 3306:3306
+    volumes:
+      - /data/babel/workspace/mysql/my.cnf:/etc/mysql/mysql.cnf
+      - mysql-data:/var/lib/mysql
+      - mysql-log:/var/log/mysql
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking
+  elasticsearch:
+    image: docker.babel.cc/babelelasticsearch
+    restart: always
+    ports:
+      - 9600:9600
+      - 9700:9700
+    volumes:
+      - elasticsearch-data:/babel/workspace/data
+      - elasticsearch-logs:/babel/workspace/logs
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-s]
+    networks:
+      - BabelNetworking
+
+  elasticsearch-java:
+    image: openjdk
+    restart: always
+    working_dir: /babel/workspace/elasticsearch_java
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    volumes:
+      - elasticsearch-app:/babel/workspace/elasticsearch_java
+      - babeldoc-storage:/babel/BabelStorage 
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    command:
+      - java
+      - -jar
+      - /babel/workspace/elasticsearch_java/ElasticSearch-6.2.4.jar
+      - /babel/workspace/elasticsearch_java/molaconfig.properties
+      - /babel/workspace/elasticsearch_java/pidFile.txt
+    networks:
+      - BabelNetworking
+
+  ConvertMsgDispatch:
+    image: openjdk
+    restart: always
+    working_dir: /babel/workspace/convertmsgdispatch
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    volumes:
+      - convertMsgDispatch-app:/babel/workspace/convertmsgdispatch
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    command:
+      - java
+      - -jar
+      - /babel/workspace/convertmsgdispatch/ConvertMsgDispatch.jar
+      - /babel/workspace/convertmsgdispatch/molaconfig.properties
+      - /babel/workspace/convertmsgdispatch/pidFile.txt
+    networks:
+      - BabelNetworking
+
+  pomelo:
+    image: docker.babel.cc/pomelo-runtime
+    # privileded: true
+    restart: always
+    depends_on:
+      - mysql
+    environment:
+      NODE_ENV: production 
+    ports:
+      - 3080:3080
+      - 3060:3060
+      - 3050:3050
+      - 3051:3051
+    volumes:
+      - pomelo-app:/app
+      - pomelo-config:/app/game-server/config
+      - pomelo-logs:/app/game-server/logs
+      - pomelo-log:/app/game-server/log
+      - pomelo-node_modules:/app/game-server/node_modules
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking 
+  webserver:
+    image: docker.babel.cc/webserver
+    # privileded: true
+    restart: always
+    depends_on:
+      - pomelo
+    ports:
+      - 8010:8080
+      - 8019:8009
+      - 8015:8005
+    volumes:
+      - web-dir:/babel/workspace/molaserver_java
+      - webTomcat-catalina:/babel/workspace/tomcat/conf/Catalina
+      - webTomcat-logs:/babel/workspace/tomcat/logs
+      - webTomcat-useroperate:/babel/workspace/tomcat/UserOperate
+      - babeldoc-storage:/babel/BabelStorage
+      - /data/babel/workspace/webTomcat/bin/catalina.sh:/babel/workspace/tomcat/bin/catalina.sh
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking
+  docserver:
+    image: docker.babel.cc/docserver
+    # privileded: true
+    restart: always
+    depends_on:
+      - webserver
+    ports:
+      - 9010:8080
+      - 9019:8009
+      - 9015:8005
+    volumes:
+      - doc-dir:/babel/workspace/docserver
+      - docTomcat-catalina:/babel/workspace/tomcat/conf/Catalina
+      - docTomcat-logs:/babel/workspace/tomcat/logs
+      - docTomcat-convertLog:/babel/workspace/tomcat/convertLog
+      - babeldoc-storage:/babel/BabelStorage
+      - /data/babel/workspace/docTomcat/bin/catalina.sh:/babel/workspace/tomcat/bin/catalina.sh
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking
+  nginx:
+    image: docker.babel.cc/babelnginx
+    # privileded: true
+    restart: always
+    depends_on:
+      - docserver
+    ports:
+      - 9020:9020
+      - 9021:8001
+      - 443:443
+    volumes:
+      - nginx-cert:/etc/nginx/cert
+      - nginx-logs:/etc/nginx/logs
+      - nginx-babelconf:/etc/nginx/babelconf
+      - Doc-WebContent:/babel/workspace/docserver/WebContent
+      - Web-WebContent:/babel/workspace/molaserver_java/WebContent
+      - /data/babel/workspace/nginx/babelconf/nginx.conf:/etc/nginx/nginx.conf
+      - /etc/hosts:/etc/hosts
+      - /etc/resolv.conf:/etc/resolv.conf
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.hostname ==  babel-m]
+    networks:
+      - BabelNetworking
+
+volumes:
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/redis
+      o: bind
+  mongoW:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/mongo
+      o: bind
+  mongo-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/mongo/data
+      o: bind
+  mysql-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/mysql/data
+      o: bind
+  mysql-log:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/mysql/log
+      o: bind
+  pomelo-app:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_node/MolaServer/appServer
+      o: bind
+  pomelo-config:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_node/MolaServer/config
+      o: bind
+  pomelo-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_node/MolaServer/logs
+      o: bind
+  pomelo-log:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_node/MolaServer/log
+      o: bind
+  pomelo-node_modules:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_node/MolaServer/node_modules
+      o: bind
+  web-dir:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_java
+      o: bind 
+  webTomcat-catalina:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/webTomcat/conf/Catalina 
+      o: bind
+  webTomcat-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/webTomcat/logs
+      o: bind
+  webTomcat-useroperate:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/webTomcat/UserOperate
+      o: bind
+  doc-dir:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/docserver
+      o: bind 
+  docTomcat-catalina:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/docTomcat/conf/Catalina 
+      o: bind
+  docTomcat-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/docTomcat/logs
+      o: bind
+  docTomcat-convertLog:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/docTomcat/convertLog
+      o: bind
+  # babeldoc-storage:
+  #   driver: local
+  #   driver_opts:
+  #     type: none
+  #     device: /data/babel/BabelStorage
+  #     o: bind
+  babeldoc-storage:
+    driver_opts:
+      type: "nfs"
+      device: ":/data_vol/BabelStorage"
+      o: "addr=172.16.1.116,rw"   
+  nginx-cert:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/nginx/cert
+      o: bind
+  nginx-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/nginx/logs
+      o: bind
+  nginx-babelconf:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/nginx/babelconf
+      o: bind
+  Doc-WebContent:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/docserver/WebContent
+      o: bind
+  Web-WebContent:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/molaserver_java/WebContent
+      o: bind
+  # elasticsearch-data:
+  #   driver_opts:
+  #     type: "nfs"
+  #     device: ":/data/babel/workspace/elasticsearch/data"
+  #     o: "addr=172.16.1.115,rw" 
+  # elasticsearch-logs:
+  #   driver_opts:
+  #     type: "nfs"
+  #     device: ":/data/babel/workspace/elasticsearch/logs"
+  #     o: "addr=172.16.1.115,rw"      
+  elasticsearch-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/elasticsearch/data
+      o: bind
+  elasticsearch-logs:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/elasticsearch/logs
+      o: bind
+  elasticsearch-app:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/elasticsearch_java
+      o: bind   
+  convertMsgDispatch-app:
+    driver: local
+    driver_opts:
+      type: none
+      device: /data/babel/workspace/convertmsgdispatch
+      o: bind 
+networks:
+  BabelNetworking:
+      driver: overlay
